@@ -1,0 +1,1 @@
+# Amazon IAM Policy Documents
