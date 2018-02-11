@@ -19,10 +19,63 @@ import qualified Test.Hspec                as Hspec
 
 main :: IO ()
 main = Hspec.hspec $ do
-    test "test/golden/policy-simulator-api.json" $
+    test "iam-policy-simulator.json" $
         Policy.statement
             (Policy.allow
-                & Policy.action .~
+                & Policy.action   .~
+                    Policy.Match
+                        [ "iam:GetGroup"
+                        , "iam:GetGroupPolicy"
+                        , "iam:GetPolicy"
+                        , "iam:GetPolicyVersion"
+                        , "iam:GetRole"
+                        , "iam:GetRolePolicy"
+                        , "iam:GetUser"
+                        , "iam:GetUserPolicy"
+                        , "iam:ListAttachedGroupPolicies"
+                        , "iam:ListAttachedRolePolicies"
+                        , "iam:ListAttachedUserPolicies"
+                        , "iam:ListGroups"
+                        , "iam:ListGroupPolicies"
+                        , "iam:ListGroupsForUser"
+                        , "iam:ListRolePolicies"
+                        , "iam:ListRoles"
+                        , "iam:ListUserPolicies"
+                        , "iam:ListUsers"
+                        ]
+                & Policy.resource ?~
+                    Policy.wildcard)
+
+    test "iam-user-rotate-credentials.json" $
+          Policy.statement
+              (Policy.allow
+                  & Policy.action   .~
+                      Policy.Match
+                          [ "iam:ListUsers"
+                          , "iam:GetAccountPasswordPolicy"
+                          ]
+                  & Policy.resource ?~
+                      Policy.wildcard)
+
+        <> Policy.statement
+              (Policy.allow
+                  & Policy.action   .~
+                      Policy.Match
+                          [ "iam:*AccessKey*"
+                          , "iam:ChangePassword"
+                          , "iam:GetUser"
+                          , "iam:*ServiceSpecificCredential*"
+                          , "iam:*SigningCertificate*"
+                          ]
+                  & Policy.resource ?~
+                      Policy.Match
+                          [ "arn:aws:iam::*:user/${aws:username}"
+                          ])
+
+    test "policy-simulator-api.json" $
+        Policy.statement
+            (Policy.allow
+                & Policy.action   .~
                     Policy.Match
                         [ "iam:GetContextKeysForCustomPolicy"
                         , "iam:GetContextKeysForPrincipalPolicy"
@@ -32,10 +85,57 @@ main = Hspec.hspec $ do
                 & Policy.resource ?~
                     Policy.wildcard)
 
-    test "test/golden/self-managed-mfa.json" $
+    test "policy-simulator-console.json" $
            Policy.statement
                (Policy.allow
-                   & Policy.action .~
+                   & Policy.action  .~
+                       Policy.Match
+                           [ "iam:GetPolicy"
+                           , "iam:GetUserPolicy"
+                           ]
+                   & Policy.resource ?~
+                       Policy.wildcard)
+
+        <> Policy.statement
+               (Policy.allow
+                   & Policy.action   .~
+                       Policy.Match
+                           [ "iam:GetUser"
+                           , "iam:ListAttachedUserPolicies"
+                           , "iam:ListGroupsForUser"
+                           , "iam:ListUserPolicies"
+                           , "iam:ListUsers"
+                           ]
+                   & Policy.resource ?~
+                       Policy.Match
+                           [ "arn:aws:iam::<ACCOUNTNUMBER>:user/<USER-PATH-NAME>/*"
+                           ])
+
+    test "rds-region-admin.json" $
+           Policy.statement
+               (Policy.allow
+                   & Policy.action   .~
+                       Policy.Match
+                           [ "rds:*"
+                           ]
+                   & Policy.resource ?~
+                       Policy.Match
+                           [ "arn:aws:rds:<REGION>:<ACCOUNTNUMBER>:*"
+                           ])
+
+        <> Policy.statement
+               (Policy.allow
+                   & Policy.action   .~
+                       Policy.Match
+                           [ "rds:Describe*"
+                           ]
+                   & Policy.resource ?~
+                       Policy.wildcard)
+
+    test "self-managed-mfa.json" $
+           Policy.statement
+               (Policy.allow
+                   & Policy.action   .~
                        Policy.Match
                            [ "iam:CreateVirtualMFADevice"
                            , "iam:EnableMFADevice"
@@ -79,7 +179,7 @@ test :: String -> Policy Statement -> Hspec.Spec
 test name actual =
     Hspec.describe name $
         Hspec.it "should equal the serialized haskell value" $
-            parseFile name
+            parseFile ("test/golden/" ++ name)
                 >>= Hspec.shouldBe actual
 
 parseFile :: FromJSON a => String -> IO a

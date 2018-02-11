@@ -20,7 +20,6 @@ module Amazonka.IAM.Policy
 
     , Id        (..)
     , Sid       (..)
-    , Key       (..)
     , Action    (..)
     , Resource  (..)
     , Principal (..)
@@ -39,6 +38,7 @@ module Amazonka.IAM.Policy
     , principal
     , resource
 
+    , Key       (..)
     , Condition (..)
     ) where
 
@@ -93,6 +93,8 @@ instance FromJSON Version where
         "2012-10-17" -> pure Version20121017
         x            -> fail ("Unabled to parse Version from " ++ show x)
 
+-- | A policy document is a non-empty list of IAM statements with a supported
+-- version.
 newtype Policy a = Policy { statements :: NonEmpty a }
     deriving (Show, Eq, Functor, Foldable, Traversable)
 
@@ -115,12 +117,17 @@ instance FromJSON a => FromJSON (Policy a) where
         Policy <$ (o .: "Version" :: JSON.Parser Version)
                <*> o .: "Statement"
 
+-- | Obtain the supported version of the policy document.
 version :: Policy a -> Version
 version = const Version20121017
 
+-- | Create a singleton policy containing only one statement. The 'Semigroup'
+-- instance and '(<>)' can be used to combine multiple statements into a larger
+-- policy.
 statement :: a -> Policy a
 statement = Policy . pure
 
+-- | Encode the IAM policy document as JSON.
 encode :: Policy Statement -> LBS.ByteString
 encode = JSON.encode
 
@@ -161,9 +168,6 @@ newtype Id = Id Text
 -- you're working with.
 newtype Sid = Sid Text
     deriving (Show, Eq, Ord, ToJSON, FromJSON, IsString)
-
-newtype Key = Key { fromKey :: Text }
-    deriving (Show, Eq, FromJSON, ToJSON, IsString)
 
 -- | The 'Effect' element is required and specifies whether the statement
 -- results in an allow or an explicit deny.
@@ -374,6 +378,10 @@ resource
     -> Statement
     -> f Statement
 resource f s = (\a -> s { _resource = a }) <$> f (_resource s)
+
+-- | A key that will be tested as the target of a 'Condition'.
+newtype Key = Key { fromKey :: Text }
+    deriving (Show, Eq, FromJSON, ToJSON, IsString)
 
 -- |
 --
