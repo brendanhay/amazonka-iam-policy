@@ -3,7 +3,9 @@
 
 module Main (main) where
 
-import Data.Aeson     (FromJSON, ToJSON)
+import Amazonka.IAM.Policy (Policy, Statement)
+
+import Data.Aeson     (FromJSON)
 import Data.Semigroup ((<>))
 
 import Lens.Micro ((&), (.~), (?~))
@@ -20,40 +22,42 @@ main = Hspec.hspec $ do
     test "test/golden/policy-simulator-api.json" $
         Policy.statement
             (Policy.allow
-                & Policy.action   .~
-                    Policy.Any
+                & Policy.action .~
+                    Policy.Match
                         [ "iam:GetContextKeysForCustomPolicy"
                         , "iam:GetContextKeysForPrincipalPolicy"
                         , "iam:SimulateCustomPolicy"
                         , "iam:SimulatePrincipalPolicy"
                         ]
-                & Policy.resource ?~ Policy.wildcard)
+                & Policy.resource ?~
+                    Policy.wildcard)
 
     test "test/golden/self-managed-mfa.json" $
            Policy.statement
                (Policy.allow
-                   & Policy.action   .~
-                       Policy.Any
+                   & Policy.action .~
+                       Policy.Match
                            [ "iam:CreateVirtualMFADevice"
                            , "iam:EnableMFADevice"
                            , "iam:ResyncMFADevice"
                            , "iam:DeleteVirtualMFADevice"
                            ]
                    & Policy.resource ?~
-                       Policy.Any
+                       Policy.Match
                            [ "arn:aws:iam::*:mfa/${aws:username}"
                            , "arn:aws:iam::*:user/${aws:username}"
                            ])
 
         <> Policy.statement
                (Policy.allow
-                   & Policy.sid ?~ "AllowUsersToDeactivateTheirOwnVirtualMFADevice"
-                   & Policy.action .~
-                       Policy.Any
+                   & Policy.sid       ?~
+                       "AllowUsersToDeactivateTheirOwnVirtualMFADevice"
+                   & Policy.action    .~
+                       Policy.Match
                            [ "iam:DeactivateMFADevice"
                            ]
-                   & Policy.resource ?~
-                       Policy.Any
+                   & Policy.resource  ?~
+                       Policy.Match
                            [ "arn:aws:iam::*:mfa/${aws:username}"
                            , "arn:aws:iam::*:user/${aws:username}"
                            ]
@@ -62,15 +66,16 @@ main = Hspec.hspec $ do
 
         <> Policy.statement
                (Policy.allow
-                   & Policy.action .~
-                       Policy.Any
+                   & Policy.action   .~
+                       Policy.Match
                            [ "iam:ListMFADevices"
                            , "iam:ListVirtualMFADevices"
                            , "iam:ListUsers"
                            ]
-                   & Policy.resource ?~ Policy.wildcard)
+                   & Policy.resource ?~
+                       Policy.wildcard)
 
-test :: (Show a, Eq a, FromJSON a, ToJSON a) => String -> a -> Hspec.Spec
+test :: String -> Policy Statement -> Hspec.Spec
 test name actual =
     Hspec.describe name $
         Hspec.it "should equal the serialized haskell value" $

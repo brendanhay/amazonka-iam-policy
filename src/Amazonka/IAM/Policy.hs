@@ -5,51 +5,69 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE TupleSections              #-}
 {-# LANGUAGE TypeFamilies               #-}
 {-# LANGUAGE ViewPatterns               #-}
 
-module Amazonka.IAM.Policy where
+module Amazonka.IAM.Policy
+    ( Version   (..)
 
-import Prelude hiding (negate, not)
+    , Policy    (..)
+    , version
+    , statement
+    , encode
 
-import Control.Applicative ((<|>))
+    , Id        (..)
+    , Sid       (..)
+    , Key       (..)
+    , Action    (..)
+    , Resource  (..)
+    , Principal (..)
 
-import Data.Aeson             (FromJSON, ToJSON (toJSON), (.:), (.:?), (.=))
-import Data.Bifunctor         (second)
-import Data.ByteString        (ByteString)
-import Data.List.NonEmpty     (NonEmpty)
-import Data.Maybe             (catMaybes)
-import Data.Profunctor        (dimap)
-import Data.Profunctor.Choice (Choice (right'))
-import Data.Scientific        (Scientific, scientificP)
-import Data.Semigroup         (Semigroup ((<>)))
-import Data.String            (IsString (fromString))
-import Data.Text              (Text)
-import Data.Time              (UTCTime)
+    , Match     (..)
+    , wildcard
+
+    , Statement (..)
+    , allow
+    , deny
+
+    , sid
+    , condition
+    , effect
+    , action
+    , principal
+    , resource
+
+    , Condition (..)
+    ) where
+
+import Prelude hiding (not)
+
+import Control.Applicative (optional, (<|>))
+
+import Data.Aeson         (FromJSON, ToJSON (toJSON), (.:), (.:?), (.=))
+import Data.Bifunctor     (second)
+import Data.ByteString    (ByteString)
+import Data.List.NonEmpty (NonEmpty)
+import Data.Maybe         (catMaybes)
+import Data.Scientific    (Scientific, scientificP)
+import Data.Semigroup     (Semigroup ((<>)))
+import Data.String        (IsString)
+import Data.Text          (Text)
+import Data.Time          (UTCTime)
 
 import GHC.Exts (IsList (..))
 
 import qualified Data.Aeson                   as JSON
 import qualified Data.Aeson.Types             as JSON
 import qualified Data.ByteString.Base64       as Base64
+import qualified Data.ByteString.Lazy         as LBS
 import qualified Data.List.NonEmpty           as NE
 import qualified Data.Text.Encoding           as Text
 import qualified Data.Time.Clock.POSIX        as POSIX
 import qualified Data.Time.Format             as Time
 import qualified Text.ParserCombinators.ReadP as Read
-
-type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
-
-type Lens' s a = Lens s s a a
-
-type Prism s t a b = forall p f. (Choice p, Applicative f) => p a (f b) -> p s (f t)
-
-prism :: (b -> t) -> (s -> Either t a) -> Prism s t a b
-prism bt seta = dimap seta (either pure (fmap bt)) . right'
-{-# INLINE prism #-}
 
 -- | The 'Version' elements specifies the language syntax rules that are to be
 -- used to process this policy. If you include features that are not available in
@@ -75,36 +93,36 @@ instance FromJSON Version where
         "2012-10-17" -> pure Version20121017
         x            -> fail ("Unabled to parse Version from " ++ show x)
 
-newtype Document a = Document (NonEmpty a)
+newtype Policy a = Policy { statements :: NonEmpty a }
     deriving (Show, Eq, Functor, Foldable, Traversable)
 
-instance IsList (Document a) where
-    type Item (Document a) = a
-
-    toList (Document xs) = NE.toList xs
-    fromList             = Document . NE.fromList
-
-instance Applicative Document where
+instance Applicative Policy where
     pure                      = statement
-    Document f <*> Document x = Document (f <*> x)
+    Policy f <*> Policy x = Policy (f <*> x)
 
-instance Eq a => Semigroup (Document a) where
-    (<>) (Document xs) (Document ys) = Document (NE.nub (xs <> ys))
+instance Eq a => Semigroup (Policy a) where
+    (<>) (Policy xs) (Policy ys) = Policy (NE.nub (xs <> ys))
 
-instance ToJSON a => ToJSON (Document a) where
-    toJSON (Document xs) =
+instance ToJSON a => ToJSON (Policy a) where
+    toJSON x@(Policy xs) =
         JSON.object
-            [ "Version"   .= ("2012-10-17" :: Text)
+            [ "Version"   .= version x
             , "Statement" .= xs
             ]
 
-instance FromJSON a => FromJSON (Document a) where
-    parseJSON = JSON.withObject "Document" $ \o ->
-        Document <$ (o .: "Version" :: JSON.Parser Version)
-                 <*> o .: "Statement"
+instance FromJSON a => FromJSON (Policy a) where
+    parseJSON = JSON.withObject "Policy" $ \o ->
+        Policy <$ (o .: "Version" :: JSON.Parser Version)
+               <*> o .: "Statement"
 
-statement :: a -> Document a
-statement = Document . pure
+version :: Policy a -> Version
+version = const Version20121017
+
+statement :: a -> Policy a
+statement = Policy . pure
+
+encode :: Policy Statement -> LBS.ByteString
+encode = JSON.encode
 
 -- | The 'Id' element specifies an optional identifier for the policy. The ID
 -- is used differently in different services.
@@ -144,84 +162,8 @@ newtype Id = Id Text
 newtype Sid = Sid Text
     deriving (Show, Eq, Ord, ToJSON, FromJSON, IsString)
 
--- | The 'Statement' element is the main element for a policy. This element is
--- required. It can include multiple elements (see the subsequent sections in this
--- page). The Statement element contains an array of individual statements.
-data Statement = Statement
-    { _sid       :: !(Maybe Sid)
-    , _effect    :: !Effect
-    , _condition :: !(Maybe Condition)
-    , _action    :: !(Match [Action])
-    , _resource  :: !(Maybe (Match [Resource]))
-    , _principal :: !(Maybe (Match Principal))
-    } deriving (Show, Eq)
-
-instance ToJSON Statement where
-    toJSON Statement{..} =
-        let match k = \case
-              Any v -> k .= v
-              Not v -> ("Not" <> k) .= v
-         in JSON.object $ catMaybes
-            [ fmap ("Sid"       .=)    _sid
-            , Just ("Effect"    .=     _effect)
-            , fmap ("Condition" .=)    _condition
-            , Just (match "Action"     _action)
-            , fmap (match "Resource")  _resource
-            , fmap (match "Principal") _principal
-            ]
-
-instance FromJSON Statement where
-    parseJSON = JSON.withObject "Statement" $ \o -> do
-        let match :: FromJSON a => Text -> JSON.Parser (Match a)
-            match k = Any <$> o .: k
-                  <|> Not <$> o .: ("Not" <> k)
-
-        _sid       <- o .:? "Sid"
-        _effect    <- o .:  "Effect"
-        _condition <- o .:? "Condition"
-
-        _action    <- match "Action"
-                  <|> fmap (:[]) <$> match "Action"
-
-        _resource  <- Just <$> match "Resource"
-                  <|> Just . fmap (:[]) <$> match "Resource"
-                  <|> pure Nothing
-
-        _principal <- Just <$> match "Principal"
-                  <|> pure Nothing
-
-        pure Statement{..}
-
-allow :: Statement
-allow = Statement
-    { _effect    = Allow
-    , _action    = Any []
-    , _sid       = Nothing
-    , _principal = Nothing
-    , _resource  = Nothing
-    , _condition = Nothing
-    }
-
-deny :: Statement
-deny = allow { _effect = Deny }
-
-effect :: Lens' Statement Effect
-effect f s = (\a -> s { _effect = a }) <$> f (_effect s)
-
-action :: Lens' Statement (Match [Action])
-action f s = (\a -> s { _action = a }) <$> f (_action s)
-
-sid :: Lens' Statement (Maybe Sid)
-sid f s = (\a -> s { _sid = a }) <$> f (_sid s)
-
-principal :: Lens' Statement (Maybe (Match Principal))
-principal f s = (\a -> s { _principal = a }) <$> f (_principal s)
-
-resource :: Lens' Statement (Maybe (Match [Resource]))
-resource f s = (\a -> s { _resource = a }) <$> f (_resource s)
-
-condition :: Lens' Statement (Maybe Condition)
-condition f s = (\a -> s { _condition = a }) <$> f (_condition s)
+newtype Key = Key { fromKey :: Text }
+    deriving (Show, Eq, FromJSON, ToJSON, IsString)
 
 -- | The 'Effect' element is required and specifies whether the statement
 -- results in an allow or an explicit deny.
@@ -283,30 +225,26 @@ instance ToJSON Principal where
         CanonicalUser k  -> JSON.object ["CanonicalUser" .= k]
 
 instance FromJSON Principal where
-    parseJSON = \case
-        JSON.String "*" -> pure Everyone
+    parseJSON v = everyone v <|> nested v
+      where
+        everyone =
+            JSON.withText "Principal:*" $ \case
+                "*" -> pure Everyone
+                x   -> fail ("Unable to parse Principal:* from " ++ show x)
 
-      -- JSON.withObject "Principal" $ \o ->
-      -- where
-      --   everyone = JSON.withText "*"
+        nested =
+            JSON.withObject "Principal" $ \o ->
+                    AWS           <$> o .: "AWS"
+                <|> Federated     <$> o .: "Federated"
+                <|> Service       <$> o .: "Service"
+                <|> CanonicalUser <$> o .: "CanonicalUser"
 
 -- | The 'Action' element describes the specific action or actions that will be
 -- allowed or denied. Statements must include either an Action or NotAction
 -- element. Each AWS service has its own set of actions that describe tasks that
 -- you can perform with that service.
 newtype Action = Action Text
-    deriving (Show, Eq, Ord, ToJSON, FromJSON, IsString)
-
--- instance FromJSON Action where
---     parseJSON = fmap Action . \case
---         (JSON.String s) -> pure (pure s)
---         o               -> JSON.parseJSON o
-
--- instance IsList Action where
---     type Item Action = Text
-
---     toList (Action xs) = xs
---     fromList           = Action
+    deriving (Show, Eq, ToJSON, FromJSON, IsString)
 
 -- | The 'Resource' element specifies the object or objects that the statement
 -- covers. Statements must include either a Resource or a NotResource element.
@@ -320,40 +258,136 @@ newtype Action = Action Text
 -- /Note:/ Some services do not let you specify actions for individual
 -- resources; instead, any actions that you list in the Action or NotAction
 -- element apply to all resources in that service. In these cases, you use the
--- wildcard * in the Resource element.
+-- wildcard @"*"@ in the Resource element.
 newtype Resource = Resource Text
-    deriving (Show, Eq, Ord, ToJSON, FromJSON, IsString)
+    deriving (Show, Eq, ToJSON, FromJSON, IsString)
 
 data Match a
-    = Any !a
-    | Not !a
+    = Match !a
+    | Not   !a
       deriving (Show, Eq, Functor, Foldable, Traversable)
 
 wildcard :: IsString a => Match [a]
-wildcard = Any [fromString "*"]
+wildcard = Match ["*"]
 
-_Any :: Prism (Match a) (Match a) a a
-_Any =
-    prism Any $ \case
-        Any x -> Right x
-        y     -> Left  y
+matchToJSON :: ToJSON a => Text -> Match a -> JSON.Pair
+matchToJSON k = \case
+    Match v -> k .= v
+    Not   v -> ("Not" <> k) .= v
 
-_Not :: Prism (Match a) (Match a) a a
-_Not =
-    prism Not $ \case
-        Not x -> Right x
-        y     -> Left  y
+matchParseJSON :: FromJSON a => Text -> JSON.Object -> JSON.Parser (Match a)
+matchParseJSON k o =
+        Match <$> o .: k
+    <|> Not   <$> o .: ("Not" <> k)
 
+-- | The 'Statement' element is the main element for a policy. This element is
+-- required. It can include multiple elements (see the subsequent sections in this
+-- page). The Statement element contains an array of individual statements.
+data Statement = Statement
+    { _sid       :: !(Maybe Sid)
+    , _condition :: !(Maybe Condition)
+    , _effect    :: !Effect
+    , _action    :: !(Match [Action])
+    , _principal :: !(Maybe (Match Principal))
+    , _resource  :: !(Maybe (Match [Resource]))
+    } deriving (Show, Eq)
 
--- | The 'Condition' element (or Condition block) lets you specify conditions for when
--- a policy is in effect. The Condition element is optional. In the Condition
--- element, you build expressions in which you use condition operators (equal,
--- less than, etc.) to match the condition in the policy against values in the
--- request. Condition values can include date, time, the IP address of the
--- requester, the ARN of the request source, the user name, user ID, and the user
--- agent of the requester. Some services let you specify additional values in
--- conditions; for example, Amazon S3 lets you write a condition using the
--- @s3:VersionId@ key, which is unique to that service.
+instance ToJSON Statement where
+    toJSON Statement{..} =
+        JSON.object $ catMaybes
+            [ fmap ("Sid" .=) _sid
+            , fmap ("Condition" .=) _condition
+            , Just ("Effect" .= _effect)
+            , Just (matchToJSON "Action" _action)
+            , matchToJSON "Principal" <$> _principal
+            , matchToJSON "Resource"  <$> _resource
+            ]
+
+instance FromJSON Statement where
+    parseJSON = JSON.withObject "Statement" $ \o -> do
+        _sid       <- o .:? "Sid"
+        _effect    <- o .:  "Effect"
+        _condition <- o .:? "Condition"
+
+        _action    <-
+                fmap (:[]) <$> matchParseJSON "Action" o
+            <|> matchParseJSON "Action" o
+
+        _resource  <- optional $
+                fmap (:[]) <$> matchParseJSON "Resource" o
+            <|> matchParseJSON "Resource" o
+
+        _principal <- optional (matchParseJSON "Principal" o)
+
+        pure Statement{..}
+
+allow :: Statement
+allow = Statement
+    { _sid       = Nothing
+    , _condition = Nothing
+    , _effect    = Allow
+    , _action    = Match []
+    , _principal = Nothing
+    , _resource  = Nothing
+    }
+
+deny :: Statement
+deny = allow { _effect = Deny }
+
+sid :: Functor f
+    => (Maybe Sid -> f (Maybe Sid))
+    -> Statement
+    -> f Statement
+sid f s = (\a -> s { _sid = a }) <$> f (_sid s)
+
+condition
+    :: Functor f
+    => (Maybe Condition -> f (Maybe Condition))
+    -> Statement
+    -> f Statement
+condition f s = (\a -> s { _condition = a }) <$> f (_condition s)
+
+effect
+    :: Functor f
+    => (Effect -> f Effect)
+    -> Statement
+    -> f Statement
+effect f s = (\a -> s { _effect = a }) <$> f (_effect s)
+
+action
+    :: Functor f
+    => (Match [Action] -> f (Match [Action]))
+    -> Statement
+    -> f Statement
+action f s = (\a -> s { _action = a }) <$> f (_action s)
+
+principal
+    :: Functor f
+    => (Maybe (Match Principal) -> f (Maybe (Match Principal)))
+    -> Statement
+    -> f Statement
+principal f s = (\a -> s { _principal = a }) <$> f (_principal s)
+
+resource
+    :: Functor f
+    => (Maybe (Match [Resource]) -> f (Maybe (Match [Resource])))
+    -> Statement
+    -> f Statement
+resource f s = (\a -> s { _resource = a }) <$> f (_resource s)
+
+-- |
+--
+-- = Conditions
+--
+-- The 'Condition' element (or Condition block) lets you specify conditions for
+-- when a policy is in effect. The Condition element is optional. In the
+-- Condition element, you build expressions in which you use condition
+-- operators (equal, less than, etc.) to match the condition in the policy
+-- against values in the request. Condition values can include date, time, the
+-- IP address of the requester, the ARN of the request source, the user name,
+-- user ID, and the user agent of the requester. Some services let you specify
+-- additional values in conditions; for example, Amazon S3 lets you write a
+-- condition using the @s3:VersionId@ key, which is unique to that service.
 --
 --
 -- == String Conditions
@@ -438,9 +472,6 @@ _Not =
 -- has a value. The following example shows a condition that states that the user
 -- must not be using temporary credentials (the key must not exist) for the user
 -- to use the Amazon EC2 API.
-newtype Key = Key { fromKey :: Text }
-    deriving (Show, Eq, Ord, ToJSON, FromJSON, IsString)
-
 data Condition
     = StringEquals              !Key !Text
     -- ^ Exact matching, case sensitive.
