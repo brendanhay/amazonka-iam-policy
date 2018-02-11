@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+                "iam:GetGroup",
+                "iam:GetGroupPolicy",
+                "iam:GetPolicy",
+                "iam:GetPolicyVersion",
+                "iam:GetRole",
+                "iam:GetRolePolicy",
+                "iam:GetUser",
+                "iam:GetUserPolicy",
+                "iam:ListAttachedGroupPolicies",
+                "iam:ListAttachedRolePolicies",
+                "iam:ListAttachedUserPolicies",
+                "iam:ListGroups",
+                "iam:ListGroupPolicies",
+                "iam:ListGroupsForUser",
+                "iam:ListRolePolicies",
+                "iam:ListRoles",
+                "iam:ListUserPolicies",
+                "iam:ListUsers"
+       ],
+      "Effect": "Allow",
+      "Resource":"*"
+    }
+  ]
+}

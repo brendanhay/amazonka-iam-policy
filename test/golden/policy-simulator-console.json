@@ -1,0 +1,24 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetUserPolicy"
+      ],
+      "Effect": "Allow",
+      "Resource": "*"
+    },
+    {
+      "Action": [
+        "iam:GetUser",
+        "iam:ListAttachedUserPolicies",
+        "iam:ListGroupsForUser",
+        "iam:ListUserPolicies",
+        "iam:ListUsers"
+      ],
+      "Effect": "Allow",
+      "Resource": "arn:aws:iam::<ACCOUNTNUMBER>:user/<USER-PATH-NAME>/*"
+    }
+  ]
+}

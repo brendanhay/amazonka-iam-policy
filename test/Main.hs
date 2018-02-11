@@ -3,9 +3,8 @@
 
 module Main (main) where
 
-import Data.Aeson         (FromJSON, ToJSON)
-import Data.List.NonEmpty (NonEmpty ((:|)))
-import Data.Semigroup     ((<>))
+import Data.Aeson     (FromJSON, ToJSON)
+import Data.Semigroup ((<>))
 
 import Lens.Micro ((&), (.~), (?~))
 
@@ -58,7 +57,8 @@ main = Hspec.hspec $ do
                            [ "arn:aws:iam::*:mfa/${aws:username}"
                            , "arn:aws:iam::*:user/${aws:username}"
                            ]
-                   & Policy.condition ?~ Policy.Condition)
+                   & Policy.condition ?~
+                       Policy.Bool "aws:MultiFactorAuthPresent" True)
 
         <> Policy.statement
                (Policy.allow
