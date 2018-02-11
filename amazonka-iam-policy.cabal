@@ -38,8 +38,12 @@ library
     build-depends:
           aeson
         , base >= 4.7 && < 5
-        , text
+        , base64-bytestring
+        , bytestring
         , profunctors
+        , scientific
+        , text
+        , time
 
 test-suite tests
     type:              exitcode-stdio-1.0
