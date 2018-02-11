@@ -123,9 +123,9 @@ newtype Sid = Sid Text
 -- required. It can include multiple elements (see the subsequent sections in this
 -- page). The Statement element contains an array of individual statements.
 data Statement = Statement
-    { sid       :: !(Maybe Sid)
-    , effect    :: !Effect
+    { effect    :: !Effect
     , action    :: !Action
+    , sid       :: !(Maybe Sid)
     , principal :: !(Maybe Principal)
     , resource  :: !(Maybe Resource)
     , condition :: !(Maybe Condition)
@@ -134,19 +134,19 @@ data Statement = Statement
 instance ToJSON Statement where
     toJSON x =
         JSON.object $ catMaybes
-            [ fmap ("Sid"       .=) (sid x)
-            , Just ("Effect"    .= effect x)
+            [ Just ("Effect"    .= effect x)
             , Just ("Action"    .= action x)
+            , fmap ("Sid"       .=) (sid       x)
             , fmap ("Principal" .=) (principal x)
             , fmap ("Resource"  .=) (resource  x)
---            , fmap ("Condition" .=) (condition x)
+            , fmap ("Condition" .=) (condition x)
             ]
 
 instance FromJSON Statement where
     parseJSON = JSON.withObject "Statement" $ \o -> do
-        sid       <- o .:? "Sid"
         effect    <- o .:  "Effect"
         action    <- o .:  "Action"
+        sid       <- o .:? "Sid"
         principal <- o .:? "Principal"
         resource  <- o .:? "Resource"
         condition <- o .:? "Condition"
@@ -154,9 +154,9 @@ instance FromJSON Statement where
 
 allow :: Action -> Statement
 allow xs = Statement
-    { sid       = Nothing
-    , effect    = Allow
+    { effect    = Allow
     , action    = xs
+    , sid       = Nothing
     , principal = Nothing
     , resource  = Nothing
     , condition = Nothing
@@ -164,8 +164,6 @@ allow xs = Statement
 
 deny :: Action -> Statement
 deny xs = (allow xs) { effect = Deny }
-
---   Effect, Action, Resource, Condition
 
 -- | The 'Effect' element is required and specifies whether the statement
 -- results in an allow or an explicit deny.
