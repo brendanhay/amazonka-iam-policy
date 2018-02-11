@@ -39,6 +39,7 @@ library
           aeson
         , base >= 4.7 && < 5
         , text
+        , profunctors
 
 test-suite tests
     type:              exitcode-stdio-1.0
@@ -57,3 +58,4 @@ test-suite tests
         , base
         , bytestring
         , hspec
+        , microlens

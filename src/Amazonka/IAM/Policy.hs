@@ -1,27 +1,35 @@
 {-# LANGUAGE DeriveFoldable             #-}
 {-# LANGUAGE DeriveFunctor              #-}
 {-# LANGUAGE DeriveTraversable          #-}
+{-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase                 #-}
 {-# LANGUAGE OverloadedStrings          #-}
+{-# LANGUAGE RankNTypes                 #-}
 {-# LANGUAGE RecordWildCards            #-}
 {-# LANGUAGE TypeFamilies               #-}
 
 module Amazonka.IAM.Policy where
 
-import Data.Aeson         (FromJSON, ToJSON (toJSON), (.:), (.:?), (.=))
-import Data.List.NonEmpty (NonEmpty (..))
-import Data.Maybe         (catMaybes)
-import Data.Semigroup     (Semigroup ((<>)))
-import Data.String        (IsString)
-import Data.Text          (Text)
+import Prelude hiding (negate, not)
+
+import Control.Applicative ((<|>))
+
+import Data.Aeson             (FromJSON, ToJSON (toJSON), (.:), (.:?), (.=))
+import Data.Functor.Identity  (Identity (..))
+import Data.List.NonEmpty     (NonEmpty (..))
+import Data.Maybe             (catMaybes)
+import Data.Profunctor        (dimap)
+import Data.Profunctor.Choice (Choice (right'))
+import Data.Semigroup         (Semigroup ((<>)))
+import Data.String            (IsString (fromString))
+import Data.Text              (Text)
 
 import GHC.Exts (IsList (..))
 
 import qualified Data.Aeson         as JSON
+import qualified Data.Aeson.Types   as JSON
 import qualified Data.List.NonEmpty as NE
-
--- FIXME: Deliberately no IsString instances so people have to write Action "foo", Id "foo", etc.
 
 -- | The 'Version' elements specifies the language syntax rules that are to be
 -- used to process this policy. If you include features that are not available in
@@ -47,37 +55,38 @@ instance FromJSON Version where
         "2012-10-17" -> pure Version20121017
         x            -> fail ("Unabled to parse Version from " ++ show x)
 
-data Document a = Document !Version !(NonEmpty a)
+-- FIXME: Deliberately no IsString instances so people have to write Action "foo", Id "foo", etc.
+
+newtype Document a = Document (NonEmpty a)
     deriving (Show, Eq, Functor, Foldable, Traversable)
 
 instance IsList (Document a) where
     type Item (Document a) = a
 
-    toList (Document _ xs) = NE.toList xs
-    fromList               = Document mempty . NE.fromList
+    toList (Document xs) = NE.toList xs
+    fromList             = Document . NE.fromList
 
 instance Applicative Document where
-    pure                          = document
-    Document a f <*> Document b x = Document (a <> b) (f <*> x)
+    pure                      = statement
+    Document f <*> Document x = Document (f <*> x)
 
 instance Eq a => Semigroup (Document a) where
-    (<>) (Document a xs) (Document b ys) =
-          Document (a <> b) (NE.nub (xs <> ys))
+    (<>) (Document xs) (Document ys) = Document (NE.nub (xs <> ys))
 
 instance ToJSON a => ToJSON (Document a) where
-    toJSON (Document v xs) =
+    toJSON (Document xs) =
         JSON.object
-            [ "Version"   .= v
+            [ "Version"   .= ("2012-10-17" :: Text)
             , "Statement" .= xs
             ]
 
 instance FromJSON a => FromJSON (Document a) where
     parseJSON = JSON.withObject "Document" $ \o ->
-        Document <$> o .: "Version"
+        Document <$ (o .: "Version" :: JSON.Parser Version)
                  <*> o .: "Statement"
 
-document :: a -> Document a
-document = Document mempty . pure
+statement :: a -> Document a
+statement = Document . pure
 
 -- document :: Statement ->
 
@@ -123,47 +132,103 @@ newtype Sid = Sid Text
 -- required. It can include multiple elements (see the subsequent sections in this
 -- page). The Statement element contains an array of individual statements.
 data Statement = Statement
-    { effect    :: !Effect
-    , action    :: !Action
-    , sid       :: !(Maybe Sid)
-    , principal :: !(Maybe Principal)
-    , resource  :: !(Maybe Resource)
-    , condition :: !(Maybe Condition)
+    { _sid       :: !(Maybe Sid)
+    , _effect    :: !Effect
+    , _condition :: !(Maybe Condition)
+    , _action    :: !(Match [Action])
+    , _resource  :: !(Maybe (Match [Resource]))
+    , _principal :: !(Maybe (Match Principal))
     } deriving (Show, Eq)
 
 instance ToJSON Statement where
-    toJSON x =
-        JSON.object $ catMaybes
-            [ Just ("Effect"    .= effect x)
-            , Just ("Action"    .= action x)
-            , fmap ("Sid"       .=) (sid       x)
-            , fmap ("Principal" .=) (principal x)
-            , fmap ("Resource"  .=) (resource  x)
-            , fmap ("Condition" .=) (condition x)
+    toJSON Statement{..} =
+        let match k = \case
+              Any v -> k .= v
+              Not v -> ("Not" <> k) .= v
+         in JSON.object $ catMaybes
+            [ fmap ("Sid"       .=)    _sid
+            , Just ("Effect"    .=     _effect)
+            , fmap ("Condition" .=)    _condition
+            , Just (match "Action"     _action)
+            , fmap (match "Resource")  _resource
+            , fmap (match "Principal") _principal
             ]
 
 instance FromJSON Statement where
     parseJSON = JSON.withObject "Statement" $ \o -> do
-        effect    <- o .:  "Effect"
-        action    <- o .:  "Action"
-        sid       <- o .:? "Sid"
-        principal <- o .:? "Principal"
-        resource  <- o .:? "Resource"
-        condition <- o .:? "Condition"
+        let match :: FromJSON a => Text -> JSON.Parser (Match a)
+            match k = Any <$> o .: k
+                  <|> Not <$> o .: ("Not" <> k)
+
+        _sid       <- o .:? "Sid"
+        _effect    <- o .:  "Effect"
+        _condition <- o .:? "Condition"
+
+        _action    <- match "Action"
+                  <|> fmap (:[]) <$> match "Action"
+
+        _resource  <- Just <$> match "Resource"
+                  <|> Just . fmap (:[]) <$> match "Resource"
+                  <|> pure Nothing
+
+        _principal <- Just <$> match "Principal"
+                  <|> pure Nothing
+
         pure Statement{..}
 
-allow :: Action -> Statement
-allow xs = Statement
-    { effect    = Allow
-    , action    = xs
-    , sid       = Nothing
-    , principal = Nothing
-    , resource  = Nothing
-    , condition = Nothing
+allow :: Statement
+allow = Statement
+    { _effect    = Allow
+    , _action    = Any []
+    , _sid       = Nothing
+    , _principal = Nothing
+    , _resource  = Nothing
+    , _condition = Nothing
     }
 
-deny :: Action -> Statement
-deny xs = (allow xs) { effect = Deny }
+deny :: Statement
+deny = allow { _effect = Deny }
+
+effect
+    :: Functor f
+    => (Effect -> f Effect)
+    -> Statement
+    -> f Statement
+effect f s = (\a -> s { _effect = a }) <$> f (_effect s)
+
+action
+    :: Functor f
+    => (Match [Action] -> f (Match [Action]))
+    -> Statement
+    -> f Statement
+action f s = (\a -> s { _action = a }) <$> f (_action s)
+
+sid :: Functor f
+    => (Maybe Sid -> f (Maybe Sid))
+    -> Statement
+    -> f Statement
+sid f s = (\a -> s { _sid = a }) <$> f (_sid s)
+
+principal
+    :: Functor f
+    => (Maybe (Match Principal) -> f (Maybe (Match Principal)))
+    -> Statement
+    -> f Statement
+principal f s = (\a -> s { _principal = a }) <$> f (_principal s)
+
+resource
+    :: Functor f
+    => (Maybe (Match [Resource]) -> f (Maybe (Match [Resource])))
+    -> Statement
+    -> f Statement
+resource f s = (\a -> s { _resource = a }) <$> f (_resource s)
+
+condition
+    :: Functor f
+    => (Maybe Condition -> f (Maybe Condition))
+    -> Statement
+    -> f Statement
+condition f s = (\a -> s { _condition = a }) <$> f (_condition s)
 
 -- | The 'Effect' element is required and specifies whether the statement
 -- results in an allow or an explicit deny.
@@ -236,14 +301,19 @@ instance FromJSON Principal where
 -- allowed or denied. Statements must include either an Action or NotAction
 -- element. Each AWS service has its own set of actions that describe tasks that
 -- you can perform with that service.
-newtype Action = Action [Text]
-    deriving (Show, Eq, Ord, ToJSON, FromJSON)
+newtype Action = Action Text
+    deriving (Show, Eq, Ord, ToJSON, FromJSON, IsString)
 
-instance IsList Action where
-    type Item Action = Text
+-- instance FromJSON Action where
+--     parseJSON = fmap Action . \case
+--         (JSON.String s) -> pure (pure s)
+--         o               -> JSON.parseJSON o
 
-    toList (Action xs) = xs
-    fromList           = Action
+-- instance IsList Action where
+--     type Item Action = Text
+
+--     toList (Action xs) = xs
+--     fromList           = Action
 
 -- | The 'Resource' element specifies the object or objects that the statement
 -- covers. Statements must include either a Resource or a NotResource element.
@@ -258,24 +328,19 @@ instance IsList Action where
 -- resources; instead, any actions that you list in the Action or NotAction
 -- element apply to all resources in that service. In these cases, you use the
 -- wildcard * in the Resource element.
-newtype Resource = Resource [Text]
-    deriving (Show, Eq, Ord)
+newtype Resource = Resource Text
+    deriving (Show, Eq, Ord, ToJSON, FromJSON, IsString)
 
-instance IsList Resource where
-    type Item Resource = Text
+-- instance IsList Resource where
+--     type Item Resource = Text
 
-    toList (Resource xs) = xs
-    fromList             = Resource
+--     toList (Resource xs) = xs
+--     fromList             = Resource
 
-instance ToJSON Resource where
-    toJSON = \case
-        Resource ["*"] -> JSON.String "*"
-        Resource xs    -> toJSON xs
-
-instance FromJSON Resource where
-    parseJSON = fmap Resource . \case
-        JSON.String "*" -> pure ["*"]
-        o               -> JSON.parseJSON o
+-- instance FromJSON Resource where
+--     parseJSON = fmap Resource . \case
+--         JSON.String s -> pure (pure s)
+--         o             -> JSON.parseJSON o
 
 -- | The 'Condition' element (or Condition block) lets you specify conditions for when
 -- a policy is in effect. The Condition element is optional. In the Condition
@@ -295,9 +360,34 @@ instance ToJSON Condition where
 instance FromJSON Condition where
     parseJSON = const (pure Condition)
 
--- data NotPrincipal
--- data NotAction
--- data NotResource
+data Match a
+    = Any !a
+    | Not !a
+      deriving (Show, Eq, Functor, Foldable, Traversable)
 
-newtype Not a = Not a
-    deriving (Show, Eq)
+wildcard :: IsString a => Match [a]
+wildcard = Any [fromString "*"]
+
+_Any :: Prism (Match a) (Match a) a a
+_Any =
+    prism Any $ \case
+        Any x -> Right x
+        y     -> Left  y
+
+_Not :: Prism (Match a) (Match a) a a
+_Not =
+    prism Not $ \case
+        Not x -> Right x
+        y     -> Left  y
+
+type Lens s t a b = forall f. Functor f => (a -> f b) -> s -> f t
+
+lens :: (s -> a) -> (s -> b -> t) -> Lens s t a b
+lens sa sbt afb s = sbt s <$> afb (sa s)
+{-# INLINE lens #-}
+
+type Prism s t a b = forall p f. (Choice p, Applicative f) => p a (f b) -> p s (f t)
+
+prism :: (b -> t) -> (s -> Either t a) -> Prism s t a b
+prism bt seta = dimap seta (either pure (fmap bt)) . right'
+{-# INLINE prism #-}

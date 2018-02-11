@@ -3,9 +3,11 @@
 
 module Main (main) where
 
-import Data.Aeson     (FromJSON, ToJSON)
-import Data.Function  ((&))
-import Data.Semigroup ((<>))
+import Data.Aeson         (FromJSON, ToJSON)
+import Data.List.NonEmpty (NonEmpty ((:|)))
+import Data.Semigroup     ((<>))
+
+import Lens.Micro ((&), (.~), (?~))
 
 import qualified Amazonka.IAM.Policy       as Policy
 import qualified Data.Aeson                as JSON
@@ -15,60 +17,65 @@ import qualified System.IO.Error           as IO
 import qualified Test.Hspec                as Hspec
 
 main :: IO ()
-main =
-    Hspec.hspec $
-        Hspec.describe "golden tests" $ do
-            test "test/golden/policy-simulator-api.json" $
-                Policy.document
-                    (Policy.allow
+main = Hspec.hspec $ do
+    test "test/golden/policy-simulator-api.json" $
+        Policy.statement
+            (Policy.allow
+                & Policy.action   .~
+                    Policy.Any
                         [ "iam:GetContextKeysForCustomPolicy"
                         , "iam:GetContextKeysForPrincipalPolicy"
                         , "iam:SimulateCustomPolicy"
                         , "iam:SimulatePrincipalPolicy"
-                        ]) { Policy.resource = Just
-                               [ "*"
-                               ]
-                           }
+                        ]
+                & Policy.resource ?~ Policy.wildcard)
 
-            test "test/golden/self-managed-mfa.json" $
-                   Policy.document
-                       (Policy.allow
+    test "test/golden/self-managed-mfa.json" $
+           Policy.statement
+               (Policy.allow
+                   & Policy.action   .~
+                       Policy.Any
                            [ "iam:CreateVirtualMFADevice"
                            , "iam:EnableMFADevice"
                            , "iam:ResyncMFADevice"
                            , "iam:DeleteVirtualMFADevice"
-                           ]) { Policy.resource = Just
-                                   [ "arn:aws:iam::*:mfa/${aws:username}"
-                                   , "arn:aws:iam::*:user/${aws:username}"
-                                   ]
-                              }
-                <> Policy.document
-                       (Policy.allow
+                           ]
+                   & Policy.resource ?~
+                       Policy.Any
+                           [ "arn:aws:iam::*:mfa/${aws:username}"
+                           , "arn:aws:iam::*:user/${aws:username}"
+                           ])
+
+        <> Policy.statement
+               (Policy.allow
+                   & Policy.sid ?~ "AllowUsersToDeactivateTheirOwnVirtualMFADevice"
+                   & Policy.action .~
+                       Policy.Any
                            [ "iam:DeactivateMFADevice"
-                           ]) { Policy.sid = Just
-                                  "AllowUsersToDeactivateTheirOwnVirtualMFADevice"
-                              , Policy.resource = Just
-                                   [ "arn:aws:iam::*:mfa/${aws:username}"
-                                   , "arn:aws:iam::*:user/${aws:username}"
-                                   ]
-                              , Policy.condition = Just
-                                  Policy.Condition
-                              }
-                <> Policy.document
-                       (Policy.allow
+                           ]
+                   & Policy.resource ?~
+                       Policy.Any
+                           [ "arn:aws:iam::*:mfa/${aws:username}"
+                           , "arn:aws:iam::*:user/${aws:username}"
+                           ]
+                   & Policy.condition ?~ Policy.Condition)
+
+        <> Policy.statement
+               (Policy.allow
+                   & Policy.action .~
+                       Policy.Any
                            [ "iam:ListMFADevices"
                            , "iam:ListVirtualMFADevices"
                            , "iam:ListUsers"
-                           ]) { Policy.resource = Just
-                                  [ "*"
-                                  ]
-                              }
+                           ]
+                   & Policy.resource ?~ Policy.wildcard)
 
 test :: (Show a, Eq a, FromJSON a, ToJSON a) => String -> a -> Hspec.Spec
 test name actual =
-    Hspec.it name $
-        parseFile name
-            >>= Hspec.shouldBe actual
+    Hspec.describe name $
+        Hspec.it "should equal the serialized haskell value" $
+            parseFile name
+                >>= Hspec.shouldBe actual
 
 parseFile :: FromJSON a => String -> IO a
 parseFile name = do

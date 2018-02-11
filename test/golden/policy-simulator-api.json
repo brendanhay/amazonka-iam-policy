@@ -9,7 +9,7 @@
         "iam:SimulatePrincipalPolicy"
       ],
       "Effect" : "Allow",
-      "Resource" : "*"
+      "Resource" : ["*"]
     }
   ]
 }
