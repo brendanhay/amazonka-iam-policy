@@ -1,6 +1,6 @@
 name:                  amazonka-iam-policy
 version:               0.0.1
-synopsis:              Amazon IAM Policy Documents.
+synopsis:              Amazon IAM Policy Document DSL and Combinators.
 homepage:              https://github.com/brendanhay/amazonka-iam-policy
 bug-reports:           https://github.com/brendanhay/amazonka-iam-policy/issues
 license:               MPL-2.0
@@ -15,7 +15,22 @@ cabal-version:         >= 1.10
 data-files:            test/golden/*.json
 
 description:
-    Amazon IAM Policy Documents.
+    This library provides data types and combinators that allow you to declare,
+    encode, and decode the <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies.html IAM JSON policy>
+    language with a modicum of safety, minus any extreme type-level features.
+    .
+    The IAM policy documents can be safely constructed via the provided datatypes
+    and mapped, folded, and traversed via the provided instances, combinators,
+    and lenses. The resulting structure can then be encoded as a valid IAM JSON
+    policy document for using with Amazon IAM and related services.
+    .
+    The details of what goes into a policy vary for each service, depending on what
+    actions the service makes available, what types of resources it contains, and
+    so on. When you're writing policies for a specific service, it's helpful to see
+    examples of policies for that service. View the
+    <https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_aws-services-that-work-with-iam.html AWS Services That Work with IAM> documentation for more information.
+    .
+    See "Amazonka.IAM.Policy" to get started.
 
 source-repository head
     type:              git
@@ -34,12 +49,14 @@ library
 
     exposed-modules:
         Amazonka.IAM.Policy
+        Amazonka.IAM.Policy.Lens
 
     build-depends:
           aeson
         , base >= 4.7 && < 5
         , base64-bytestring
         , bytestring
+        , profunctors
         , scientific
         , text
         , time
@@ -56,7 +73,8 @@ test-suite doctest
         Paths_amazonka_iam_policy
 
     build-depends:
-          amazonka-iam-policy
+          aeson-pretty
+        , amazonka-iam-policy
         , doctest
         , base
 
@@ -64,7 +82,7 @@ test-suite golden
     type:              exitcode-stdio-1.0
     default-language:  Haskell2010
     hs-source-dirs:    test
-    main-is:           Main.hs
+    main-is:           Golden.hs
 
     ghc-options:       -Wall -threaded
 
@@ -77,4 +95,3 @@ test-suite golden
         , base
         , bytestring
         , hspec
-        , microlens
