@@ -325,6 +325,7 @@ instance FromJSON Statement where
 
         pure Statement{..}
 
+-- | Create a new statement with the effect set to 'Allow'.
 allow :: Statement
 allow = Statement
     { _sid       = Nothing
@@ -335,6 +336,7 @@ allow = Statement
     , _resource  = Nothing
     }
 
+-- | Create a new statement with the effect set to 'Deny'.
 deny :: Statement
 deny = allow { _effect = Deny }
 
