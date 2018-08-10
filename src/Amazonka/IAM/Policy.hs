@@ -105,6 +105,7 @@ import qualified Data.Aeson                   as JSON
 import qualified Data.Aeson.Types             as JSON
 import qualified Data.ByteString.Base64       as Base64
 import qualified Data.ByteString.Lazy         as LBS
+import qualified Data.List.NonEmpty           as NE
 import qualified Data.Text.Encoding           as Text
 import qualified Data.Time.Clock.POSIX        as POSIX
 import qualified Data.Time.Format             as Time
@@ -278,28 +279,24 @@ equivalent to @"*"@. Combinators are then provided for the common cases.
             "Action": [
                 "foo",
                 "bar"
-            ],
-            "Resource": []
+            ]
 ...
 
 >>> encode' $ singleton (allow { action = not ["baz"] })
 ...
             "Effect": "Allow",
-            "Resource": [],
             "NotAction": "baz"
 ...
 
 >>> encode' $ singleton (allow { action = any })
 ...
             "Effect": "Allow",
-            "Action": "*",
-            "Resource": []
+            "Action": "*"
 ...
 
 >>> encode' $ singleton (allow { action = none })
 ...
             "Effect": "Allow",
-            "Resource": [],
             "NotAction": "*"
 ...
 
@@ -491,13 +488,11 @@ instance FromJSON a => FromJSON (Policy a) where
     "Statement": [
         {
             "Effect": "Allow",
-            "Action": [],
-            "Resource": []
+            "Action": []
         },
         {
             "Effect": "Deny",
-            "Action": [],
-            "Resource": []
+            "Action": []
         }
     ],
     "Version": "2012-10-17"
@@ -539,7 +534,7 @@ singleton = document . pure
 ==== Example
 
 >>> encode $ singleton allow
-"{\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[],\"Resource\":[]}],\"Version\":\"2012-10-17\"}"
+"{\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[]}],\"Version\":\"2012-10-17\"}"
 
 -}
 encode :: Policy Statement -> LBS.ByteString
@@ -651,7 +646,8 @@ instance ToJSON Statement where
             , fmap (blockToJSON "Principal") principal
             , Just ("Effect" .= effect)
             , Just (blockToJSON "Action"   $ oneOrMany action)
-            , Just (blockToJSON "Resource" $ oneOrMany resource)
+            , fmap (blockToJSON "Resource" . oneOrMany . fmap NE.toList)
+                   (sequence (fmap NE.nonEmpty resource))
             , fmap ("Condition" .=) condition
             ]
     {-# INLINEABLE toJSON #-}
@@ -714,7 +710,6 @@ Use the 'sid' record field to set the 'Sid' of a 'Statement'.
         {
             "Effect": "Allow",
             "Action": [],
-            "Resource": [],
             "Sid": "cd3ad3d9-2776-4ef1-a904-4c229d1642ee"
         }
     ],
@@ -798,8 +793,7 @@ You can use 'Not' to negate the meaning of a 'Principal' element.
         {
             "Effect": "Allow",
             "NotPrincipal": "*",
-            "Action": [],
-            "Resource": []
+            "Action": []
         }
     ],
     "Version": "2012-10-17"
@@ -815,8 +809,7 @@ You can use 'Not' to negate the meaning of a 'Principal' element.
                 "AWS": [
                     "arn:foo:::bar"
                 ]
-            },
-            "Resource": []
+            }
         }
     ],
     "Version": "2012-10-17"
@@ -995,7 +988,6 @@ conditions; for example, Amazon S3 lets you write a condition using the
         {
             "Effect": "Allow",
             "Action": [],
-            "Resource": [],
             "Condition": {
                 "Bool": {
                     "aws:MultiFactorAuthPresent": true
