@@ -1,5 +1,5 @@
 name:                  amazonka-iam-policy
-version:               0.0.1
+version:               0.0.2
 synopsis:              Amazon IAM Policy Document DSL and Combinators.
 homepage:              https://github.com/brendanhay/amazonka-iam-policy
 bug-reports:           https://github.com/brendanhay/amazonka-iam-policy/issues
