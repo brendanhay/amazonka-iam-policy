@@ -28,7 +28,8 @@ module Amazonka.IAM.Policy
     -- $usage
 
     -- * Policy Documents
-      Policy    (..)
+      Document
+    , Policy    (..)
 
     -- ** Constructing Policies
     , document
@@ -446,6 +447,8 @@ preserving the highest supported version and first encountered 'Id'.
 > }
 
 -}
+type Document = Policy Statement
+
 data Policy a = Policy
     { version   :: !(Maybe Version)
     , id        :: !(Maybe Id)
