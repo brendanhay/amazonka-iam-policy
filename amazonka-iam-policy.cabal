@@ -1,5 +1,5 @@
 name:                  amazonka-iam-policy
-version:               0.0.3
+version:               0.0.3.1
 synopsis:              Amazon IAM Policy Document DSL and Combinators.
 homepage:              https://github.com/brendanhay/amazonka-iam-policy
 bug-reports:           https://github.com/brendanhay/amazonka-iam-policy/issues
@@ -56,7 +56,6 @@ library
         , base64-bytestring
         , bytestring
         , hashable
-        , profunctors
         , scientific
         , text
         , time
