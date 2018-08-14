@@ -55,6 +55,7 @@ library
         , base >= 4.7 && < 5
         , base64-bytestring
         , bytestring
+        , hashable
         , profunctors
         , scientific
         , text

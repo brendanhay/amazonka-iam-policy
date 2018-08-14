@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveFoldable             #-}
 {-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE DeriveGeneric              #-}
 {-# LANGUAGE DeriveTraversable          #-}
 {-# LANGUAGE FlexibleContexts           #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -91,6 +92,7 @@ import Data.Aeson         (FromJSON, ToJSON (toJSON), (.:), (.:?), (.=))
 import Data.Bifunctor     (second)
 import Data.ByteString    (ByteString)
 import Data.Function      (on)
+import Data.Hashable      (Hashable (hashWithSalt))
 import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe         (catMaybes)
 import Data.Scientific    (Scientific, scientificP)
@@ -99,7 +101,8 @@ import Data.String        (IsString)
 import Data.Text          (Text)
 import Data.Time          (UTCTime)
 
-import GHC.Exts (IsList (..))
+import GHC.Exts     (IsList (..))
+import GHC.Generics (Generic)
 
 import qualified Data.Aeson                   as JSON
 import qualified Data.Aeson.Types             as JSON
@@ -107,8 +110,8 @@ import qualified Data.ByteString.Base64       as Base64
 import qualified Data.ByteString.Lazy         as LBS
 import qualified Data.List.NonEmpty           as NE
 import qualified Data.Text.Encoding           as Text
+import qualified Data.Time                    as Time
 import qualified Data.Time.Clock.POSIX        as POSIX
-import qualified Data.Time.Format             as Time
 import qualified Text.ParserCombinators.ReadP as Read
 
 {- $setup
@@ -317,7 +320,9 @@ language.
 data Block a
     = Match !(Match a)
     | Not   !(Match a)
-      deriving (Show, Eq, Functor, Foldable, Traversable)
+      deriving (Show, Eq, Ord, Generic, Functor, Foldable, Traversable)
+
+instance Hashable a => Hashable (Block a)
 
 blockToJSON :: ToJSON a => Text -> Block a -> JSON.Pair
 blockToJSON k = \case
@@ -368,7 +373,9 @@ language.
 data Match a
     = Some !a
     | Wildcard
-      deriving (Show, Eq, Functor, Foldable, Traversable)
+      deriving (Show, Eq, Ord, Generic, Functor, Foldable, Traversable)
+
+instance Hashable a => Hashable (Match a)
 
 instance Semigroup a => Semigroup (Match a) where
     (<>) a b =
@@ -403,7 +410,9 @@ instance FromJSON a => FromJSON (Match a) where
 data OneOrMany a
     = One  !a
     | Many ![a]
-      deriving (Show, Eq)
+      deriving (Show, Eq, Ord, Generic, Functor, Foldable, Traversable)
+
+instance Hashable a => Hashable (OneOrMany a)
 
 instance ToJSON a => ToJSON (OneOrMany a) where
     toJSON = \case
@@ -450,7 +459,9 @@ data Policy a = Policy
     { version   :: !(Maybe Version)
     , id        :: !(Maybe Id)
     , statement :: !(NonEmpty a)
-    } deriving (Show, Eq, Functor, Foldable, Traversable)
+    } deriving (Show, Eq, Ord, Generic, Functor, Foldable, Traversable)
+
+instance Hashable a => Hashable (Policy a)
 
 -- FIXME: Note about pointwise 'First' behaviour of version/id.
 instance Semigroup (Policy a) where
@@ -561,7 +572,9 @@ versions.
 data Version
     = Version_2008_10_17
     | Version_2012_10_17
-      deriving (Show, Eq, Ord)
+      deriving (Show, Eq, Ord, Generic)
+
+instance Hashable Version
 
 -- | '(<>)' always chooses the newest version.
 instance Semigroup Version where
@@ -609,7 +622,7 @@ Use the 'id' record field to set the 'Id' of a 'Policy' document.
 
 -}
 newtype Id = Id { fromId :: Text }
-    deriving (Show, Eq, Ord, ToJSON, FromJSON, IsString)
+    deriving (Show, Eq, Ord, Hashable, ToJSON, FromJSON, IsString)
 
 {- | The 'Statement' element is the main element for a policy. This element is
 required. It can include multiple elements (see the subsequent sections in this
@@ -636,7 +649,9 @@ data Statement = Statement
     , action    :: !(Block [Action])
     , resource  :: !(Block [Resource])
     , condition :: !(Maybe Condition)
-    } deriving (Show, Eq)
+    } deriving (Show, Eq, Ord, Generic)
+
+instance Hashable Statement
 
 instance ToJSON Statement where
     toJSON Statement{..} =
@@ -718,7 +733,7 @@ Use the 'sid' record field to set the 'Sid' of a 'Statement'.
 
 -}
 newtype Sid = Sid { fromSid :: Text }
-    deriving (Show, Eq, Ord, ToJSON, FromJSON, IsString)
+    deriving (Show, Eq, Ord, Hashable, ToJSON, FromJSON, IsString)
 
 {- | The 'Effect' element is required and specifies whether the statement
 results in an allow or an explicit deny.
@@ -736,7 +751,9 @@ desired 'Effect' set.
 > <effect_block> = "Effect" : ("Allow" | "Deny")
 -}
 data Effect = Allow | Deny
-    deriving (Show, Eq, Ord, Enum)
+    deriving (Show, Eq, Ord, Generic, Enum)
+
+instance Hashable Effect
 
 instance ToJSON Effect where
     toJSON = \case
@@ -822,7 +839,9 @@ data Principal
     | Federated     !Text
     | Service       !(NonEmpty Text)
     | CanonicalUser !Text
-      deriving (Show, Eq)
+      deriving (Show, Eq, Ord, Generic)
+
+instance Hashable Principal
 
 instance ToJSON Principal where
     toJSON = \case
@@ -862,8 +881,8 @@ You can use 'Not' to negate the meaning of a list of 'Action' elements.
 >     ("*" | [<action_string>, <action_string>, ...])
 
 -}
-newtype Action = Action Text
-    deriving (Show, Eq, ToJSON, FromJSON, IsString)
+newtype Action = Action { fromAction :: Text }
+    deriving (Show, Eq, Ord, Hashable, ToJSON, FromJSON, IsString)
 
 {- | The 'Resource' element specifies the object or objects that the statement
 covers. Statements must include either a Resource or a NotResource element.
@@ -887,12 +906,12 @@ You can use 'Not' to negate the meaning of a list of 'Resource' elements.
 >     ("*" | [<resource_string>, <resource_string>, ...])
 
 -}
-newtype Resource = Resource Text
-    deriving (Show, Eq, ToJSON, FromJSON, IsString)
+newtype Resource = Resource { fromResource :: Text }
+    deriving (Show, Eq, Ord, Hashable, ToJSON, FromJSON, IsString)
 
 -- | A key that will be tested as the target of a 'Condition'.
 newtype Key = Key { fromKey :: Text }
-    deriving (Show, Eq, FromJSON, ToJSON, IsString)
+    deriving (Show, Eq, Ord, Hashable, FromJSON, ToJSON, IsString)
 
 {- | The 'Condition' element (or Condition block) lets you specify conditions
 for when a policy is in effect. The Condition element is optional. In the
@@ -1076,7 +1095,121 @@ data Condition
     -- ^ Negated matching for ARN. These behave identically.
     | ArnNotLike                !Key !Text
     -- ^ Negated matching for ARN. These behave identically.
-      deriving (Show, Eq)
+      deriving (Show, Eq, Ord, Generic)
+
+instance Hashable Condition where
+    hashWithSalt s = \case
+        StringEquals k v ->
+            s `hashWithSalt` (0 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        StringNotEquals k v ->
+            s `hashWithSalt` (1 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        StringEqualsIgnoreCase k v ->
+            s `hashWithSalt` (2 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        StringNotEqualsIgnoreCase k v ->
+            s `hashWithSalt` (3 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        StringLike k vs ->
+            s `hashWithSalt` (4 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` vs
+        StringNotLike k vs ->
+            s `hashWithSalt` (5 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` vs
+
+        NumericEquals k v ->
+            s `hashWithSalt` (6 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        NumericNotEquals k v ->
+            s `hashWithSalt` (7 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        NumericLessThan k v ->
+            s `hashWithSalt` (8 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        NumericLessThanEquals k v ->
+            s `hashWithSalt` (9 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        NumericGreaterThan k v ->
+            s `hashWithSalt` (10 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        NumericGreaterThanEquals k v ->
+            s `hashWithSalt` (11 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+
+        DateEquals k v ->
+            s `hashWithSalt` (12 :: Int)
+              `hashWithSalt` k
+              `hashUTCTime`  v
+        DateNotEquals k v ->
+            s `hashWithSalt` (13 :: Int)
+              `hashWithSalt` k
+              `hashUTCTime`  v
+        DateLessThan k v ->
+            s `hashWithSalt` (14 :: Int)
+              `hashWithSalt` k
+              `hashUTCTime`  v
+        DateLessThanEquals k v ->
+            s `hashWithSalt` (15 :: Int)
+              `hashWithSalt` k
+              `hashUTCTime`  v
+        DateGreaterThan k v ->
+            s `hashWithSalt` (16 :: Int)
+              `hashWithSalt` k
+              `hashUTCTime`  v
+        DateGreaterThanEquals k v ->
+            s `hashWithSalt` (17 :: Int)
+              `hashWithSalt` k
+              `hashUTCTime`  v
+
+        Bool k v ->
+            s `hashWithSalt` (18 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+
+        BinaryEquals k v ->
+            s `hashWithSalt` (19 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+
+        IpAddress k v ->
+            s `hashWithSalt` (20 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        NotIpAddress k v ->
+            s `hashWithSalt` (21 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+
+        ArnEquals k v ->
+            s `hashWithSalt` (22 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        ArnLike k v ->
+            s `hashWithSalt` (23 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        ArnNotEquals k v ->
+            s `hashWithSalt` (24 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+        ArnNotLike k v ->
+            s `hashWithSalt` (25 :: Int)
+              `hashWithSalt` k
+              `hashWithSalt` v
+    {-# INLINEABLE hashWithSalt #-}
 
 instance ToJSON Condition where
     toJSON x = JSON.object [op .= JSON.object [key .= val]]
@@ -1256,3 +1389,10 @@ instance FromJSON Condition where
 
         <|> fail ("Unrecognized Condition: " ++ show o)
     {-# INLINEABLE parseJSON #-}
+
+infixl 0 `hashUTCTime`
+
+hashUTCTime :: Int -> UTCTime -> Int
+hashUTCTime s (Time.UTCTime (Time.ModifiedJulianDay day) diff) =
+    s `hashWithSalt` day
+      `hashWithSalt` (Time.diffTimeToPicoseconds diff)
